@@ -37,6 +37,26 @@ const C = {
 };
 const MODES = ["ultra", "max", "fast", "store"];
 
+// Compression-strength presets shown as target ratios (1x .. 10x). These map
+// to a concrete codec mode (.drk) or a 0-9 level (zip/7z/rar). The *actual*
+// ratio depends on the data — already-compressed files (photos, video, .gz)
+// can't shrink further, that's information theory, not a bug.
+const RATIOS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const FORMATS = [
+  { id: "drk", label: ".drk  Diringkes ultra (dedupe + Brotli)" },
+  { id: "zip", label: ".zip  standard (native, portable)" },
+  { id: "7z", label: ".7z   7-Zip (needs `7z`)" },
+  { id: "rar", label: ".rar  RAR (needs `rar`)" },
+];
+const FORMAT_EXT = { drk: ".drk", zip: ".zip", "7z": ".7z", rar: ".rar" };
+
+function ratioToMode(r) {
+  if (r <= 1) return "store";
+  if (r <= 3) return "fast";
+  if (r <= 6) return "max";
+  return "ultra";
+}
+
 function KeyCap({ k, label, color = C.green, wide = true }) {
   return h(
     Box,
@@ -110,9 +130,11 @@ export function App() {
   const [arcCursor, setArcCursor] = useState(0);
   const [arcSel, setArcSel] = useState(() => new Set());
 
-  const [action, setAction] = useState(null); // {type, targets/output/mode | archive/dest/onlyFiles}
+  const [action, setAction] = useState(null); // {type, targets/output/mode/format/level | archive/dest/onlyFiles}
   const [rename, setRename] = useState(null); // {kind, old, buf, baseDir}
-  const [modeSel, setModeSel] = useState(0);
+  const [ratioSel, setRatioSel] = useState(9); // index into RATIOS (10x)
+  const [formatSel, setFormatSel] = useState(0); // index into FORMATS
+  const [nameBuf, setNameBuf] = useState("");
   const [prog, setProg] = useState({ pct: 0, msg: "" });
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -208,12 +230,24 @@ export function App() {
       targets = [cwd];
       outBase = path.basename(cwd);
     }
-    const output = path.join(cwd, outBase.replace(/\.drk$/i, "") + ".drk");
-    const act = { type: "compress", targets, output };
-    actionRef.current = act;
-    setAction(act);
-    setModeSel(0);
-    setScreen("modesel");
+    // Remember the selection; the wizard (ratio → format → name) finalizes it.
+    actionRef.current = { type: "compress", targets, outBase };
+    setRatioSel(9);
+    setFormatSel(0);
+    setScreen("wizard_ratio");
+  };
+
+  const finalizeAndCompress = () => {
+    const act = actionRef.current;
+    if (!act) return;
+    const fmt = FORMATS[formatSel].id;
+    const clean = (nameBuf || act.outBase).replace(/\.(drk|zip|7z|rar)$/i, "");
+    act.output = path.join(cwd, clean + FORMAT_EXT[fmt]);
+    act.mode = ratioToMode(RATIOS[ratioSel]);
+    act.format = fmt;
+    act.level = RATIOS[ratioSel];
+    setAction({ ...act });
+    runAction();
   };
 
   const startExtract = () => {
@@ -282,14 +316,16 @@ export function App() {
           const res = await compressTargets({
             targets: act.targets,
             output: act.output,
-            mode: MODES[modeSel],
+            mode: act.mode,
+            format: act.format,
+            level: act.level,
             onProgress: ({ processed, total }) => {
               if (ab.aborted) return;
               setProg({ pct: total ? (processed / total) * 100 : 0, msg: `compressing ${humanizeBytes(processed)}/${humanizeBytes(total)}` });
             },
           });
           if (ab.aborted) return;
-          setResult({ kind: "compress", ...res, mode: MODES[modeSel], ms: Date.now() - t0 });
+          setResult({ kind: "compress", ...res, mode: act.mode, format: act.format, ms: Date.now() - t0 });
           await loadFs(cwd).catch(() => {});
           setFsSel(new Set());
           setScreen("result");
@@ -307,7 +343,7 @@ export function App() {
         setScreen("error");
       }
     })();
-  }, [modeSel, cwd, loadFs]);
+  }, [cwd, loadFs]);
 
   const commitRename = useCallback(async () => {
     const r = rename;
@@ -386,12 +422,27 @@ export function App() {
       } else if (input === "q") {
         finish(0);
       }
-    } else if (screen === "modesel") {
+    } else if (screen === "wizard_ratio") {
       if (key.escape) setScreen("browser");
-      else if (key.upArrow) setModeSel((m) => (m + MODES.length - 1) % MODES.length);
-      else if (key.downArrow) setModeSel((m) => (m + 1) % MODES.length);
-      else if (/^[1-4]$/.test(input)) setModeSel(Number(input) - 1);
-      else if (key.return) runAction();
+      else if (key.upArrow) setRatioSel((r) => Math.max(0, r - 1));
+      else if (key.downArrow) setRatioSel((r) => Math.min(RATIOS.length - 1, r + 1));
+      else if (/^[0-9]$/.test(input)) setRatioSel(input === "0" ? RATIOS.length - 1 : Number(input) - 1);
+      else if (key.return) setScreen("wizard_format");
+    } else if (screen === "wizard_format") {
+      if (key.escape) setScreen("wizard_ratio");
+      else if (key.upArrow) setFormatSel((f) => Math.max(0, f - 1));
+      else if (key.downArrow) setFormatSel((f) => Math.min(FORMATS.length - 1, f + 1));
+      else if (/^[1-4]$/.test(input)) setFormatSel(Number(input) - 1);
+      else if (key.return) {
+        const base = actionRef.current?.outBase || "archive";
+        setNameBuf(base.replace(/\.(drk|zip|7z|rar)$/i, ""));
+        setScreen("wizard_name");
+      }
+    } else if (screen === "wizard_name") {
+      if (key.escape) setScreen("wizard_format");
+      else if (key.return) finalizeAndCompress();
+      else if (key.backspace || key.delete) setNameBuf((s) => s.slice(0, -1));
+      else if (input && !key.ctrl && !key.meta && input.length === 1) setNameBuf((s) => s + input);
     } else if (screen === "rename") {
       if (key.escape) setScreen("browser");
       else if (key.return) commitRename();
@@ -455,30 +506,56 @@ export function App() {
         Box,
         { flexDirection: "row", flexWrap: "wrap", marginTop: 1 },
         KeyCap({ k: "C", label: "ompress", wide }),
-        KeyCap({ k: "X", label: "tract", wide, color: C.teal }),
+        KeyCap({ k: "X", label: "tract/open", wide, color: C.teal }),
         KeyCap({ k: "R", label: "ename", wide, color: C.yellow }),
         KeyCap({ k: "I", label: "nfo", wide, color: C.accent }),
         KeyCap({ k: "A", label: "ll", wide, color: C.sub }),
         KeyCap({ k: "↵", label: wide ? "open/sel" : "open", wide, color: C.brand }),
         KeyCap({ k: "Q", label: "uit", wide, color: C.red })
       ),
-      h(Text, { color: C.dim }, "  ↑↓ move · space select · enter open · tab pane · bsck parent")
+      h(Text, { color: C.dim }, "  C compress selected · X extract (in archive) or open .drk · R rename · I info · A select all"),
+      h(Text, { color: C.dim }, "  ↑↓ move · space select · enter open/check · tab/←→ pane · bsck parent")
     );
-  } else if (screen === "modesel") {
+  } else if (screen === "wizard_ratio") {
     body = h(
       Box,
       { flexDirection: "column", paddingLeft: pad },
-      h(Text, { color: C.accent }, "Compression mode (↑↓ or 1-4):"),
-      ...MODES.map((m, i) =>
+      h(Text, { color: C.accent, bold: true }, "① Compression strength — target ratio"),
+      h(Text, { color: C.sub }, "   Pick a target ratio. Real ratio depends on your data:"),
+      h(Text, { color: C.dim }, "   text/logs shrink a lot; photos, video, .gz/.zip/.mp4 can't (already compressed)."),
+      ...RATIOS.map((r, i) =>
         h(
           Box,
-          { key: m, flexDirection: "row" },
-          h(Text, { color: i === modeSel ? C.green : C.sub, bold: i === modeSel }, i === modeSel ? " ▸ " : "   "),
-          h(Text, { color: i === modeSel ? C.brand : C.sub }, `${i + 1}. ${m}`)
+          { key: r, flexDirection: "row" },
+          h(Text, { color: i === ratioSel ? C.green : C.sub, bold: i === ratioSel }, i === ratioSel ? " ▸ " : "   "),
+          h(Text, { color: i === ratioSel ? C.brand : C.sub }, `${i + 1}. ~${r}x  ${ratioToMode(r)}`)
         )
       ),
-      h(Text, { color: C.sub, marginTop: 1 }, `→ ${action?.output || ""}`),
-      h(Text, { color: C.sub, marginTop: 1 }, "Enter to start · Esc cancel")
+      h(Text, { color: C.sub, marginTop: 1 }, "↑↓ or 1-9,0 to choose · Enter next · Esc cancel")
+    );
+  } else if (screen === "wizard_format") {
+    body = h(
+      Box,
+      { flexDirection: "column", paddingLeft: pad },
+      h(Text, { color: C.accent, bold: true }, "② Output format"),
+      ...FORMATS.map((f, i) =>
+        h(
+          Box,
+          { key: f.id, flexDirection: "row" },
+          h(Text, { color: i === formatSel ? C.green : C.sub, bold: i === formatSel }, i === formatSel ? " ▸ " : "   "),
+          h(Text, { color: i === formatSel ? C.brand : C.sub }, `${i + 1}. ${f.label}`)
+        )
+      ),
+      h(Text, { color: C.sub, marginTop: 1 }, "↑↓ or 1-4 to choose · Enter next · Esc back")
+    );
+  } else if (screen === "wizard_name") {
+    body = h(
+      Box,
+      { flexDirection: "column", paddingLeft: pad },
+      h(Text, { color: C.accent, bold: true }, "③ File name"),
+      h(Text, { color: C.dim }, "   default (edit or keep), then Enter to start"),
+      h(Box, { borderStyle: "round", borderColor: C.brand, paddingX: 1, marginTop: 1 }, h(Text, { color: nameBuf ? C.teal : C.dim }, nameBuf + FORMAT_EXT[FORMATS[formatSel].id])),
+      h(Text, { color: C.sub, marginTop: 1 }, "type · Enter start · Esc back")
     );
   } else if (screen === "rename") {
     body = h(
@@ -530,7 +607,7 @@ function renderResult(r, narrow) {
   if (r.kind === "compress") {
     return [
       line("output", r.output, C.teal),
-      line("mode", r.mode, C.accent),
+      line("mode", r.mode + (r.format && r.format !== "drk" ? " · " + r.format : ""), C.accent),
       line("items", String(r.inputCount ?? 0), C.sub),
       line("chunks", String(r.chunkCount ?? 0), C.sub),
       line("raw", humanizeBytes(r.rawBytes ?? 0), C.sub),

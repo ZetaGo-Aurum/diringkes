@@ -1,0 +1,164 @@
+// src/core/repack.js
+// Alternative output containers for the non-.drk formats.
+//
+//   .zip  -> written natively with zlib deflate (no external deps)
+//   .7z   -> shelled out to `7z`  (p7zip) when available
+//   .rar  -> shelled out to `rar`  when available
+//
+// The native .drk path (with dedupe + Brotli) lives in archive.js. These
+// adapters are plain single-pass compressors: great for everyday files, but
+// they do not get Diringkes' cross-file deduplication superpower.
+
+import zlib from "node:zlib";
+import { promises as fs } from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileP = promisify(execFile);
+
+// --- CRC32 (zip needs it) --------------------------------------------------
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+const u16 = (b, v, o) => b.writeUInt16LE(v >>> 0, o);
+const u32 = (b, v, o) => b.writeUInt32LE(v >>> 0, o);
+
+// ---------------------------------------------------------------------------
+// ZIP (native, deflate)
+// ---------------------------------------------------------------------------
+export async function repackZip({ inputs, output, level = 9, onProgress = () => {} }) {
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  let totalRaw = 0;
+  let byteDone = 0;
+  const totalFiles = inputs.length;
+
+  for (const f of inputs) {
+    const data = await fs.readFile(f.path);
+    const comp = level > 0 ? zlib.deflateRawSync(data, { level }) : data;
+    const method = level > 0 ? 8 : 0;
+    const crc = crc32(data);
+    const name = Buffer.from(f.relPath, "utf8");
+
+    const lh = Buffer.alloc(30);
+    u32(lh, 0x04034b50, 0);
+    u16(lh, 20, 4);
+    u16(lh, 0x0800, 6); // UTF-8 filename flag
+    u16(lh, method, 8);
+    u16(lh, 0, 10);
+    u16(lh, 0, 12);
+    u32(lh, crc, 14);
+    u32(lh, comp.length, 18);
+    u32(lh, data.length, 22);
+    u16(lh, name.length, 26);
+    u16(lh, 0, 28);
+
+    parts.push(lh, name, comp);
+
+    const cd = Buffer.alloc(46);
+    u32(cd, 0x02014b50, 0);
+    u16(cd, 20, 4);
+    u16(cd, 20, 6);
+    u16(cd, 0x0800, 8);
+    u16(cd, method, 10);
+    u16(cd, 0, 12);
+    u16(cd, 0, 14);
+    u32(cd, crc, 16);
+    u32(cd, comp.length, 20);
+    u32(cd, data.length, 24);
+    u16(cd, name.length, 28);
+    u16(cd, 0, 30);
+    u16(cd, 0, 32);
+    u16(cd, 0, 34);
+    u16(cd, 0, 36);
+    u32(cd, 0, 38);
+    u32(cd, offset, 42);
+    central.push(cd, name);
+
+    offset += lh.length + name.length + comp.length;
+    totalRaw += data.length;
+    byteDone += data.length;
+    onProgress({ processed: byteDone, total: totalRaw });
+  }
+
+  const cdBuf = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  u32(eocd, 0x06054b50, 0);
+  u16(eocd, totalFiles, 8);
+  u16(eocd, totalFiles, 10);
+  u32(eocd, cdBuf.length, 12);
+  u32(eocd, offset, 16);
+
+  await fs.writeFile(output, Buffer.concat([...parts, cdBuf, eocd]));
+
+  return {
+    output,
+    fileCount: totalFiles,
+    chunkCount: totalFiles,
+    rawBytes: totalRaw,
+    compBytes: offset + cdBuf.length + eocd.length,
+    inputCount: totalFiles,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 7z / rar (external tools)
+// ---------------------------------------------------------------------------
+export async function repackExternal({ inputs, output, tool, level = 9, onProgress = () => {} }) {
+  const bin = tool === "rar" ? "rar" : "7z";
+  const args = [
+    "a",
+    "-y",
+    `-mx=${Math.min(9, Math.max(0, level))}`,
+    output,
+    ...inputs.map((f) => f.path),
+  ];
+  try {
+    await execFileP(bin, args, { maxBuffer: 1024 * 1024 * 256 });
+  } catch (e) {
+    const hint =
+      tool === "rar"
+        ? "Install `rar` (rarlab) or pick .drk / .zip / .7z."
+        : "Install `p7zip` (provides `7z`) or pick .drk / .zip.";
+    throw new Error(`${bin} unavailable or failed: ${e.message}. ${hint}`);
+  }
+  const { size } = await fs.stat(output);
+  const totalRaw = inputs.reduce((a, f) => a + f.size, 0);
+  return {
+    output,
+    fileCount: inputs.length,
+    chunkCount: inputs.length,
+    rawBytes: totalRaw,
+    compBytes: size,
+    inputCount: inputs.length,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// dispatcher
+// ---------------------------------------------------------------------------
+export async function repack({ inputs, output, format = "drk", level = 9, onProgress = () => {} }) {
+  if (format === "zip") return repackZip({ inputs, output, level, onProgress });
+  if (format === "7z") return repackExternal({ inputs, output, tool: "7z", level, onProgress });
+  if (format === "rar") return repackExternal({ inputs, output, tool: "rar", level, onProgress });
+  throw new Error("Unsupported format: " + format);
+}
+
+// Map a Diringkes compression mode to a 0-9 level used by zip/7z/rar.
+export function modeToLevel(mode) {
+  return { store: 0, fast: 6, max: 9, ultra: 9 }[mode] ?? 9;
+}

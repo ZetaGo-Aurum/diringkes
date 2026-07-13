@@ -118,45 +118,45 @@ npm update -g diringkes
 
 ---
 
-## ✦ Tutorial: Memperbarui Diringkes (Update)
+## ✦ Tutorial: Updating Diringkes
 
-Diringkes rilis lewat **npm**, jadi memperbarui = menarik versi terbaru
-dari registry. Berikut panduan lengkapnya.
+Diringkes is published to **npm**, so updating means pulling the latest
+version from the registry. Here is the complete guide.
 
-### 1) Cek versi yang terpasang & versi terbaru
+### 1) Check the installed version and the latest version
 
 ```bash
-diringkes -v            # versi lokal, mis. "diringkes 1.0.1"
-npm view diringkes version  # versi terbaru di registry
-npm outdated -g diringkes  # ringkas: apa perlu update?
+diringkes -v                  # local version, e.g. "diringkes 1.0.3"
+npm view diringkes version    # latest version published on the registry
+npm outdated -g diringkes     # quick check: do you need an update?
 ```
 
-Jika `npm outdated` kosong, kamu sudah yang terbaru.
+If `npm outdated` prints nothing, you are already on the latest version.
 
-### 2) Perbarui (global install)
+### 2) Update (global install)
 
 ```bash
-npm update -g diringkes     # naikkan ke versi terbaru yang dipublikasikan
-# atau, paksa instal ulang versi terbaru:
+npm update -g diringkes       # bump to the latest published version
+# or, force a clean reinstall of the newest release:
 npm install -g diringkes@latest
 ```
 
-Verifikasi:
+Verify:
 
 ```bash
-drks -v                  # harus sama dengan `npm view diringkes version`
+drks -v                       # should match `npm view diringkes version`
 ```
 
-### 3) Perbarui (install dari source / fork)
+### 3) Update (install from source / your fork)
 
 ```bash
 cd diringkes
-git pull origin main        # tarik perubahan terbaru
-npm install                # pasang ulang dependensi (jika package-lock berubah)
-npm link                  # segarkan symlink global `diringkes` + `drks`
+git pull origin main          # pull the latest changes
+npm install                   # reinstall dependencies (if package-lock changed)
+npm link                      # refresh the global `diringkes` + `drks` symlinks
 ```
 
-### 4) Perbarui lewat Termux (Android)
+### 4) Update via Termux (Android)
 
 ```bash
 pkg update
@@ -164,15 +164,15 @@ npm update -g diringkes
 drks -v
 ```
 
-### 5) Rollback ke versi tertentu (jika ada regresi)
+### 5) Roll back to a specific version (if a regression appears)
 
 ```bash
-npm install -g diringkes@1.0.1   # ganti dengan versi yang ingin dikembalikan
+npm install -g diringkes@1.0.1   # replace with the version you want to restore
 ```
 
-### 6) Changelog & rilis
+### 6) Changelog & releases
 
-Semua rilis dicatat di GitHub Releases:
+All releases are recorded under GitHub Releases:
 https://github.com/ZetaGo-Aurum/diringkes/releases
 
 Untuk melihat apa yang berubah tiap versi, jalankan `drks -v` lalu
@@ -200,6 +200,22 @@ Command shortcuts: `c` compress · `x` extract · `l` list · `i` info ·
 Flags: `-o/--output`, `-m/--mode <ultra|max|fast|store>`, `-b/--base`,
 `-q/--quiet`, `-y/--yes`, plus `--ultra/--max/--fast`.
 
+Output format is selectable with `-f/--format <drk|zip|7z|rar>` (default
+`drk`). `.drk` is Diringkes' native ultra format (dedupe + Brotli). `.zip`
+is written natively (portable, open anywhere). `.7z` and `.rar` shell out to
+the system `7z` / `rar` tools when installed; if the tool is missing you get a
+clear hint to install it or pick another format.
+
+```bash
+diringkes c ./Videos -f zip  -o videos.zip   # standard .zip (native)
+diringkes c ./Videos -f 7z   -o videos.7z    # needs `7z` (p7zip)
+drks       c big.iso  -f drk  -o tiny.drk    # native ultra (default)
+```
+
+Note: `.drk` archives are extracted with Diringkes (`diringkes x`). `.zip`,
+`.7z` and `.rar` are standard formats — extract them with the usual tools
+(`unzip`, `7z x`, `unrar`).
+
 ### 2. TUI mode (touch / key friendly)
 
 ```bash
@@ -212,9 +228,15 @@ Built on **Ink**, the TUI is:
 - **Responsive** — layout reflows to the terminal width, so it stays clean on
   narrow phone-SSH clients (try it on a 40-column terminal).
 - **Touch/key friendly** — every action is reachable by **arrow keys *and*
-  number hotkeys** (1-4), behaving like large tap targets on small screens.
+   number hotkeys** (1-4), behaving like large tap targets on small screens.
+   The bottom bar always explains what each key does:
+   `C` compress · `X` extract / open `.drk` · `R` rename · `I` info ·
+   `A` select all · `↵` open / check · `Q` quit.
+- **Guided compress wizard** — pressing `C` opens a 3-step flow:
+   **① target ratio (1x–10x)** → **② output format (.drk/.zip/.7z/.rar)** →
+   **③ file name (Enter to start)**. No manual path typing.
 - **Live progress** with a streaming bar; compress / extract / inspect flows
-  are fully guided.
+   are fully guided.
 
 ---
 

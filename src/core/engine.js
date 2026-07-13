@@ -5,6 +5,8 @@
 
 import { gatherInputs } from "./walk.js";
 import { createArchive, extractArchive, listArchive, renameInArchive } from "./archive.js";
+import path from "node:path";
+import { repack, modeToLevel } from "./repack.js";
 import { humanizeBytes, compressionFactor } from "../util/humanize.js";
 
 export { renameInArchive };
@@ -13,25 +15,38 @@ export async function compressTargets({
   targets,
   output,
   mode = "ultra",
+  format = "drk",
+  level = null,
   base = null,
   onProgress = () => {},
   tmpDir,
 } = {}) {
   const inputs = await gatherInputs(targets, { base });
-  if (inputs.length === 0) {
+  // Never pack the output file into itself (e.g. compressing a directory that
+  // already holds a previous run's archive).
+  const outResolved = path.resolve(output);
+  const filtered = inputs.filter((f) => path.resolve(f.path) !== outResolved);
+  if (filtered.length === 0) {
     throw new Error("No files to compress.");
   }
-  const totalRaw = inputs.reduce((a, f) => a + f.size, 0);
-  const result = await createArchive({
-    inputs,
-    output,
-    mode,
-    onProgress,
-    tmpDir,
-  });
-  result.inputCount = inputs.length;
+  const totalRaw = filtered.reduce((a, f) => a + f.size, 0);
+  let result;
+  if (format === "drk") {
+    result = await createArchive({
+      inputs: filtered,
+      output,
+      mode,
+      onProgress,
+      tmpDir,
+    });
+  } else {
+    const lvl = level != null ? level : modeToLevel(mode);
+    result = await repack({ inputs: filtered, output, format, level: lvl, onProgress });
+  }
+  result.inputCount = filtered.length;
   result.factor = compressionFactor(totalRaw, result.compBytes);
   result.savedPercent = totalRaw > 0 ? (1 - result.compBytes / totalRaw) * 100 : 0;
+  result.format = format;
   return result;
 }
 

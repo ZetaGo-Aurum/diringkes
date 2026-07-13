@@ -50,6 +50,7 @@ function parseFlags(args) {
     const a = args[i];
     if (a === "-o" || a === "--output") flags.output = args[++i];
     else if (a === "-m" || a === "--mode") flags.mode = args[++i];
+    else if (a === "-f" || a === "--format") flags.format = args[++i];
     else if (a === "-b" || a === "--base") flags.base = args[++i];
     else if (a === "-q" || a === "--quiet") flags.quiet = true;
     else if (a === "-y" || a === "--yes") flags.yes = true;
@@ -81,9 +82,10 @@ ${theme.bold("COMMANDS")}
   ${theme.green("h")}  help                   ${theme.sub("Show this help")}
   ${theme.green("v")}  version                ${theme.sub("Show version")}
 
-${theme.bold("OPTIONS")}
-  ${theme.yellow("-o, --output <file>")}   ${theme.sub("Output path (.drk)")}
+  ${theme.bold("OPTIONS")}
+  ${theme.yellow("-o, --output <file>")}   ${theme.sub("Output path")}
   ${theme.yellow("-m, --mode <mode>")}     ${theme.sub("ultra | max | fast | store  (default: ultra)")}
+  ${theme.yellow("-f, --format <fmt>")}    ${theme.sub("drk | zip | 7z | rar  (default: drk)")}
   ${theme.yellow("-b, --base <dir>")}      ${theme.sub("Base dir for stored paths")}
   ${theme.yellow("-q, --quiet")}           ${theme.sub("Minimal output")}
   ${theme.yellow("-y, --yes")}            ${theme.sub("Skip confirmations")}
@@ -152,7 +154,11 @@ async function doCompress(flags) {
   if (!targets.length) {
     throw new Error("Specify at least one file or directory to compress.");
   }
-  const output = flags.output || defaultName(targets[0]);
+  const format = (flags.format || "drk").toLowerCase();
+  if (!["drk", "zip", "7z", "rar"].includes(format)) {
+    throw new Error("Unsupported format: " + format + " (use drk | zip | 7z | rar)");
+  }
+  const output = flags.output || defaultName(targets[0], format);
   const mode = flags.mode || "ultra";
 
   if (!flags.quiet) {
@@ -161,7 +167,7 @@ async function doCompress(flags) {
       `  ${theme.green("▶")} ${theme.bold("Compressing")} ${theme.sub(targets.join(", "))}`
     );
     console.log(
-      `  ${theme.sub("mode")} ${theme.accent(mode)}  ${theme.sub("→")} ${theme.accent(output)}\n`
+      `  ${theme.sub("mode")} ${theme.accent(mode)}  ${theme.sub("format")} ${theme.accent(format)}  ${theme.sub("→")} ${theme.accent(output)}\n`
     );
   }
 
@@ -171,6 +177,7 @@ async function doCompress(flags) {
     targets,
     output,
     mode,
+    format,
     base: flags.base,
     onProgress: ({ processed, total, done }) => {
       if (flags.quiet) return;
@@ -261,9 +268,10 @@ async function doInfo(flags) {
   return 0;
 }
 
-function defaultName(target) {
+function defaultName(target, format = "drk") {
   const base = target.replace(/[/\\]$/, "").split(/[/\\]/).pop() || "archive";
-  return `${base}.drk`;
+  const ext = { zip: ".zip", "7z": ".7z", rar: ".rar" }[format] || ".drk";
+  return `${base}${ext}`;
 }
 
 function doAbout() {

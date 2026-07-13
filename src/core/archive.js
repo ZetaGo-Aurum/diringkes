@@ -22,7 +22,8 @@
 //     chunkCount uint32
 //   [FILE CHUNK MAPS]  fileCount * chunkCount * uint32  (dict indices)
 //   [DATA SECTION]     concatenated compressed chunks
-//   [CHUNK INDEX]  chunkCount * (rawSize uint32, compSize uint32, dataOffset uint64)
+//   [CHUNK INDEX]  chunkCount * (rawSize uint32, compSize uint32, flags uint8, dataOffset uint64)
+//                    flags bit0 = chunk stored verbatim (skip decompress)
 //   [FOOTER] 12 bytes
 //     magic     "KSRD"           4
 //     indexOff  uint64           byte offset of CHUNK INDEX
@@ -94,7 +95,7 @@ export async function createArchive({
   let pendingCount = 0;
   let compressError = null;
 
-  function commitWrite(comp, hash, rawSize) {
+  function commitWrite(comp, hash, rawSize, stored) {
     const myOffset = spoolOffset;
     spoolOffset += comp.length;
     const task = writeChain.then(() => writeAll(spoolFd, comp, myOffset));
@@ -104,6 +105,7 @@ export async function createArchive({
         rawSize,
         compSize: comp.length,
         offset: myOffset,
+        stored: !!stored,
       })
     );
   }
@@ -115,8 +117,19 @@ export async function createArchive({
     } else {
       idx = dict.reserve(hash); // atomic index assignment at schedule time
       pendingCount++;
-      compress(mode, buf)
-        .then((comp) => commitWrite(comp, hash, buf.length))
+      const storeMode = mode === "store";
+      const compressDone = storeMode
+        ? Promise.resolve(buf)
+        : compress(mode, buf);
+      compressDone
+        .then((comp) => {
+          // Store incompressible chunks verbatim so the archive never
+          // bloats past the raw size (Brotli can't shrink random/already-
+          // compressed data, so storing raw is strictly better). Flag it
+          // in the chunk index so extract knows not to decompress.
+          const stored = storeMode || comp.length >= buf.length;
+          commitWrite(stored ? buf : comp, hash, buf.length, stored);
+        })
         .catch((e) => {
           compressError = e;
         })
@@ -233,13 +246,14 @@ export async function createArchive({
   // CHUNK INDEX
   const indexOff = dataStart + spoolOffset;
   const dictEntries = dict.entries();
-  const indexBuf = Buffer.alloc(dictEntries.length * (4 + 4 + 8));
+  const indexBuf = Buffer.alloc(dictEntries.length * (4 + 4 + 1 + 8));
   for (let i = 0; i < dictEntries.length; i++) {
     const e = dictEntries[i];
-    const base = i * 16;
+    const base = i * 17;
     writeU32(indexBuf, e.rawSize, base);
     writeU32(indexBuf, e.compSize, base + 4);
-    writeU64(indexBuf, dataStart + e.offset, base + 8);
+    indexBuf[base + 8] = e.stored ? 1 : 0; // flags (bit0 = stored verbatim)
+    writeU64(indexBuf, dataStart + e.offset, base + 9);
   }
   await writeAll(outFd, indexBuf, indexOff);
 
@@ -296,15 +310,16 @@ async function readFooter(fd, fileSize) {
 }
 
 async function readChunkIndex(fd, indexOff, chunkCount) {
-  const buf = Buffer.alloc(chunkCount * 16);
-  await readAt(fd, indexOff, buf, 0, chunkCount * 16);
+  const buf = Buffer.alloc(chunkCount * 17);
+  await readAt(fd, indexOff, buf, 0, chunkCount * 17);
   const out = new Array(chunkCount);
   for (let i = 0; i < chunkCount; i++) {
-    const base = i * 16;
+    const base = i * 17;
     out[i] = {
       rawSize: buf.readUInt32BE(base),
       compSize: buf.readUInt32BE(base + 4),
-      dataOffset: Number(buf.readUInt32BE(base + 8)) * 2 ** 32 + buf.readUInt32BE(base + 12),
+      stored: (buf[base + 8] & 1) === 1,
+      dataOffset: Number(buf.readUInt32BE(base + 9)) * 2 ** 32 + buf.readUInt32BE(base + 13),
     };
   }
   return out;
@@ -386,7 +401,7 @@ export async function extractArchive({
       const c = chunkIndex[ci];
       const comp = Buffer.alloc(c.compSize);
       await readAt(fd, c.dataOffset, comp, 0, c.compSize);
-      const raw = await decompress(header.mode, comp);
+      const raw = c.stored ? comp : await decompress(header.mode, comp);
       await writeAll(outFd, raw, 0, true);
     }
     await outFd.close();
@@ -498,13 +513,14 @@ export async function renameInArchive({ archive, renames }) {
     }
   }
   const newIndexOff = newDataStart + dataLen;
-  const indexBuf = Buffer.alloc(chunkIndex.length * 16);
+  const indexBuf = Buffer.alloc(chunkIndex.length * 17);
   for (let i = 0; i < chunkIndex.length; i++) {
     const c = chunkIndex[i];
-    const base = i * 16;
+    const base = i * 17;
     writeU32(indexBuf, c.rawSize, base);
     writeU32(indexBuf, c.compSize, base + 4);
-    writeU64(indexBuf, c.dataOffset + delta, base + 8);
+    indexBuf[base + 8] = c.stored ? 1 : 0;
+    writeU64(indexBuf, c.dataOffset + delta, base + 9);
   }
   await writeAll(outFd, indexBuf, newIndexOff);
   const footer = Buffer.alloc(12);
