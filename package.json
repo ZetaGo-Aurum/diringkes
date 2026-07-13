@@ -1,0 +1,52 @@
+{
+  "name": "diringkes",
+  "version": "1.0.0",
+  "description": "Diringkes — Ultra compression & archive toolkit with a modern CLI and a mobile-friendly TUI. Compress terabytes of redundant data into megabytes. Maintained by ZetaGo-Aurum.",
+  "keywords": [
+    "compress",
+    "compression",
+    "archive",
+    "deduplication",
+    "ultra",
+    "diringkes",
+    "drks",
+    "file-manager",
+    "tui",
+    "cli"
+  ],
+  "author": "ZetaGo-Aurum <zetagoaurum@users.noreply.github.com>",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "diringkes": "bin/diringkes.js",
+    "drks": "bin/drks.js"
+  },
+  "main": "src/index.js",
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node bin/diringkes.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "cli-spinners": "^2.9.2",
+    "ink": "^4.4.1",
+    "react": "^18.3.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZetaGo-Aurum/diringkes.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ZetaGo-Aurum/diringkes/issues"
+  },
+  "homepage": "https://github.com/ZetaGo-Aurum/diringkes#readme"
+}
