@@ -2,9 +2,21 @@
 // Diringkes CLI — concise, color-rich command line interface.
 
 import chalk from "chalk";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { theme, banner, progressBar } from "./ui/theme.js";
 import { compressTargets, extractTargets, inspectArchive } from "./core/engine.js";
 import { humanizeBytes, elapsed } from "./util/humanize.js";
+
+function getVersion() {
+  try {
+    const p = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+    return JSON.parse(readFileSync(p, "utf8")).version;
+  } catch {
+    return "1.0.0";
+  }
+}
 
 const COMMANDS = {
   compress: "c",
@@ -96,12 +108,12 @@ export async function runCli(argv) {
     return runTui([]);
   }
   if (rawCmd === "-h" || rawCmd === "--help") {
-    console.log(banner());
+    console.log(banner(getVersion()));
     console.log(HELP);
     return 0;
   }
   if (rawCmd === "-v" || rawCmd === "--version" || rawCmd === "version") {
-    console.log("diringkes 1.0.0  ·  ZetaGo-Aurum");
+    console.log("diringkes " + getVersion() + "  ·  ZetaGo-Aurum");
     return 0;
   }
 
@@ -110,7 +122,7 @@ export async function runCli(argv) {
   const flags = parseFlags(rest);
 
   if (cmd === "help") {
-    console.log(banner());
+    console.log(banner(getVersion()));
     console.log(HELP);
     return 0;
   }
@@ -144,7 +156,7 @@ async function doCompress(flags) {
   const mode = flags.mode || "ultra";
 
   if (!flags.quiet) {
-    console.log(banner());
+    console.log(banner(getVersion()));
     console.log(
       `  ${theme.green("▶")} ${theme.bold("Compressing")} ${theme.sub(targets.join(", "))}`
     );
@@ -200,7 +212,7 @@ async function doExtract(flags) {
   if (!archive) throw new Error("Specify an archive to extract.");
   const dest = flags.output || ".";
   if (!flags.quiet) {
-    console.log(banner());
+    console.log(banner(getVersion()));
     console.log(`  ${theme.green("▶")} ${theme.bold("Extracting")} ${theme.accent(archive)} ${theme.sub("→")} ${theme.accent(dest)}\n`);
   }
   const t0 = Date.now();
@@ -223,7 +235,7 @@ async function doList(flags) {
   const archive = flags._[0];
   if (!archive) throw new Error("Specify an archive to list.");
   const { files } = await inspectArchive(archive);
-  console.log(banner());
+  console.log(banner(getVersion()));
   console.log(`  ${theme.bold(archive)}  ${theme.sub("(" + files.length + " entries)")}\n`);
   for (const f of files) {
     console.log(
@@ -237,7 +249,7 @@ async function doInfo(flags) {
   const archive = flags._[0];
   if (!archive) throw new Error("Specify an archive to inspect.");
   const info = await inspectArchive(archive);
-  console.log(banner());
+  console.log(banner(getVersion()));
   console.log(`  ${theme.bold(archive)}\n`);
   console.log(`  ${theme.sub("mode")}        ${theme.accent(info.header.mode)}`);
   console.log(`  ${theme.sub("files")}       ${theme.accent(info.files.length)}`);
@@ -255,14 +267,14 @@ function defaultName(target) {
 }
 
 function doAbout() {
-  console.log(banner());
+  console.log(banner(getVersion()));
   const fy = theme.accent;
   console.log(`  ${theme.bold("Diringkes")} — ${theme.sub("nama & asal-usul")}\n`);
   console.log(`  ${theme.sub("Kata")} ${fy('"diringkes"')} ${theme.sub("terinspirasi dari bahasa Jawa,")}`);
   console.log(`  ${theme.sub("yang bermakna")} ${fy('"diringkas"')} ${theme.sub("— yaitu")} ${fy('"dibuat ringkas / diringkas"')}${theme.sub(".")}`);
   console.log(`  ${theme.sub("Filosofinya: bawa yang berat jadi ringan, yang panjang jadi pendek.")}\n`);
   console.log(`  ${theme.sub("Dibuat & dirawat oleh")} ${fy("ZetaGo-Aurum")}${theme.sub(".")}`);
-  console.log(`  ${theme.sub("Lisensi MIT · v1.0.0")}\n`);
+  console.log(`  ${theme.sub("Lisensi MIT · v" + getVersion())}\n`);
   console.log(`  ${theme.bold("Support & Community")}`);
   console.log(`  ${theme.sub("Trakteer  ")} ${theme.teal("https://trakteer.id/Aleocrophic/tip")}`);
   console.log(`  ${theme.sub("Community")} ${theme.teal("https://chat.whatsapp.com/KwTSsF7t5868ERksMPamyQ")}\n`);

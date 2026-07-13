@@ -16,14 +16,14 @@ export const theme = {
   ul: (s) => chalk.underline(s),
 };
 
-export function banner() {
+export function banner(version = "1.0.0") {
   const line = theme.sub("─".repeat(54));
   const title = theme.brand("◆ Diringkes");
   const tag = theme.sub("ultra compression · archive · dedupe");
   return [
     "",
     `  ${title}  ${tag}`,
-    `  ${theme.sub("by")} ${theme.accent("ZetaGo-Aurum")}  ${theme.sub("· v1.0.0")}`,
+    `  ${theme.sub("by")} ${theme.accent("ZetaGo-Aurum")}  ${theme.sub("· v" + version)}`,
     line,
     "",
   ].join("\n");
