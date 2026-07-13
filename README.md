@@ -231,6 +231,19 @@ drks t        # open the TUI right from your pocket
 
 ---
 
+## ✦ Support & Community
+
+If Diringkes helps you, a tip keeps the late-night builds alive — and the
+community is the best place to ask, share datasets, and request features.
+
+<a href="https://trakteer.id/Aleocrophic/tip" target="_blank"><img src="buttons/trakteer_button.svg" alt="Trakteer Tip" width="250"></a>
+<a href="https://chat.whatsapp.com/KwTSsF7t5868ERksMPamyQ" target="_blank"><img src="buttons/community_button.svg" alt="Join Community" width="250"></a>
+
+- 💙 **Trakteer** — support the work: https://trakteer.id/Aleocrophic/tip
+- 💬 **Join Community** — chat & updates: https://chat.whatsapp.com/KwTSsF7t5868ERksMPamyQ
+
+---
+
 ## ✦ License
 
 MIT © **ZetaGo-Aurum**

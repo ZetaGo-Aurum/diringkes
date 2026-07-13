@@ -263,5 +263,8 @@ function doAbout() {
   console.log(`  ${theme.sub("Filosofinya: bawa yang berat jadi ringan, yang panjang jadi pendek.")}\n`);
   console.log(`  ${theme.sub("Dibuat & dirawat oleh")} ${fy("ZetaGo-Aurum")}${theme.sub(".")}`);
   console.log(`  ${theme.sub("Lisensi MIT · v1.0.0")}\n`);
+  console.log(`  ${theme.bold("Support & Community")}`);
+  console.log(`  ${theme.sub("Trakteer  ")} ${theme.teal("https://trakteer.id/Aleocrophic/tip")}`);
+  console.log(`  ${theme.sub("Community")} ${theme.teal("https://chat.whatsapp.com/KwTSsF7t5868ERksMPamyQ")}\n`);
   return 0;
 }

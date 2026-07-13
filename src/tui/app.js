@@ -228,6 +228,13 @@ export function App() {
           h(Text, { color: i === menu ? C.brand : C.sub, bold: i === menu }, `${it.k}. ${it.t}`),
           h(Text, { color: C.dim }, `   ${narrow ? "" : it.d}`)
         )
+      ),
+      h(
+        Text,
+        { color: C.sub, marginTop: 1 },
+        narrow
+          ? "trakteer.id/Aleocrophic · wa.me/KwTSsF7t5868ERksMPamyQ"
+          : "support: trakteer.id/Aleocrophic · community: chat.whatsapp.com/KwTSsF7t5868ERksMPamyQ"
       )
     );
   } else if (screen === "input") {
