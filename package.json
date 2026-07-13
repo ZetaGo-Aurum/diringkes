@@ -1,6 +1,6 @@
 {
   "name": "diringkes",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Diringkes — Ultra compression & archive toolkit with a modern CLI and a mobile-friendly TUI. Compress terabytes of redundant data into megabytes. Maintained by ZetaGo-Aurum.",
   "keywords": [
     "compress",

@@ -118,6 +118,68 @@ npm update -g diringkes
 
 ---
 
+## ✦ Tutorial: Memperbarui Diringkes (Update)
+
+Diringkes rilis lewat **npm**, jadi memperbarui = menarik versi terbaru
+dari registry. Berikut panduan lengkapnya.
+
+### 1) Cek versi yang terpasang & versi terbaru
+
+```bash
+diringkes -v            # versi lokal, mis. "diringkes 1.0.1"
+npm view diringkes version  # versi terbaru di registry
+npm outdated -g diringkes  # ringkas: apa perlu update?
+```
+
+Jika `npm outdated` kosong, kamu sudah yang terbaru.
+
+### 2) Perbarui (global install)
+
+```bash
+npm update -g diringkes     # naikkan ke versi terbaru yang dipublikasikan
+# atau, paksa instal ulang versi terbaru:
+npm install -g diringkes@latest
+```
+
+Verifikasi:
+
+```bash
+drks -v                  # harus sama dengan `npm view diringkes version`
+```
+
+### 3) Perbarui (install dari source / fork)
+
+```bash
+cd diringkes
+git pull origin main        # tarik perubahan terbaru
+npm install                # pasang ulang dependensi (jika package-lock berubah)
+npm link                  # segarkan symlink global `diringkes` + `drks`
+```
+
+### 4) Perbarui lewat Termux (Android)
+
+```bash
+pkg update
+npm update -g diringkes
+drks -v
+```
+
+### 5) Rollback ke versi tertentu (jika ada regresi)
+
+```bash
+npm install -g diringkes@1.0.1   # ganti dengan versi yang ingin dikembalikan
+```
+
+### 6) Changelog & rilis
+
+Semua rilis dicatat di GitHub Releases:
+https://github.com/ZetaGo-Aurum/diringkes/releases
+
+Untuk melihat apa yang berubah tiap versi, jalankan `drks -v` lalu
+bandingkan dengan catatan rilis di atas.
+
+---
+
 ## ✦ Two modes
 
 ### 1. CLI mode (concise commands)

@@ -4,8 +4,10 @@
 // deduplication table, the codec and the archive writer/reader together.
 
 import { gatherInputs } from "./walk.js";
-import { createArchive, extractArchive, listArchive } from "./archive.js";
+import { createArchive, extractArchive, listArchive, renameInArchive } from "./archive.js";
 import { humanizeBytes, compressionFactor } from "../util/humanize.js";
+
+export { renameInArchive };
 
 export async function compressTargets({
   targets,

@@ -411,6 +411,120 @@ export async function listArchive(archive) {
   return { header, files };
 }
 
+/**
+ * Rename entries inside an existing archive. Implemented as a clean repack:
+ * the file table is rebuilt with new names while the (immutable) chunk data
+ * section is copied verbatim, so offsets shift by a constant delta. The new
+ * archive is written to a temp file and atomically swapped in.
+ *
+ * @param {object} o
+ * @param {string} o.archive
+ * @param {Map<string,string>} o.renames  oldPath -> newPath
+ */
+export async function renameInArchive({ archive, renames }) {
+  const fd = await openForRead(archive);
+  const fileSize = await sizeOf(fd);
+  const header = await readArchiveHeader(fd);
+  const { indexOff } = await readFooter(fd, fileSize);
+  const { files, mapsStart } = await readFileTable(fd, header.fileCount);
+  const dataStart = await readFileMaps(fd, mapsStart, files);
+  const dataLen = indexOff - dataStart;
+  const chunkIndex = await readChunkIndex(fd, indexOff, header.chunkCount);
+
+  // Apply renames.
+  for (const f of files) {
+    const np = renames.get(f.relPath);
+    if (np) f.relPath = String(np).split(npath.sep).join("/");
+  }
+
+  // Sizes.
+  const oldFtSize = mapsStart - headerSize();
+  let newFtSize = 0;
+  for (const f of files) {
+    const p = Buffer.from(f.relPath, "utf8");
+    newFtSize += 2 + p.length + 4 + 8 + 8 + 4;
+  }
+  const mapsSize = dataStart - mapsStart;
+  const newDataStart = headerSize() + newFtSize + mapsSize;
+  const delta = newDataStart - dataStart;
+
+  // New file table bytes.
+  const ftBuf = Buffer.alloc(newFtSize);
+  let o = 0;
+  for (const f of files) {
+    const p = Buffer.from(f.relPath, "utf8");
+    writeU16(ftBuf, p.length, o); o += 2;
+    p.copy(ftBuf, o); o += p.length;
+    writeU32(ftBuf, f.mode, o); o += 4;
+    writeU64(ftBuf, Math.round(f.mtimeMs), o); o += 8;
+    writeU64(ftBuf, f.rawSize, o); o += 8;
+    writeU32(ftBuf, f.chunkCount, o); o += 4;
+  }
+
+  // Maps bytes.
+  const mapsBuf = Buffer.alloc(mapsSize);
+  o = 0;
+  for (const f of files) {
+    for (let i = 0; i < f.map.length; i++) {
+      writeU32(mapsBuf, f.map[i], o); o += 4;
+    }
+  }
+
+  const tmp = archive + ".rename.tmp";
+  const outFd = await openForWrite(tmp);
+  const headBuf = Buffer.alloc(headerSize());
+  MAGIC.copy(headBuf, 0);
+  headBuf[4] = header.version;
+  headBuf[5] = modeId(header.mode);
+  headBuf[6] = 1;
+  headBuf[7] = 0;
+  writeU32(headBuf, files.length, 8);
+  writeU32(headBuf, chunkIndex.length, 12);
+  writeU64(headBuf, header.totalRaw, 16);
+  writeU64(headBuf, header.totalComp, 24);
+  await writeAll(outFd, headBuf, 0);
+  let pos = headerSize();
+  await writeAll(outFd, ftBuf, pos); pos += ftBuf.length;
+  await writeAll(outFd, mapsBuf, pos); pos += mapsBuf.length;
+  // Copy data section verbatim.
+  {
+    let copied = 0;
+    const block = Buffer.alloc(1024 * 1024);
+    while (copied < dataLen) {
+      const to = Math.min(block.length, dataLen - copied);
+      await readAt(fd, dataStart + copied, block, 0, to);
+      await writeAll(outFd, block.subarray(0, to), newDataStart + copied);
+      copied += to;
+    }
+  }
+  const newIndexOff = newDataStart + dataLen;
+  const indexBuf = Buffer.alloc(chunkIndex.length * 16);
+  for (let i = 0; i < chunkIndex.length; i++) {
+    const c = chunkIndex[i];
+    const base = i * 16;
+    writeU32(indexBuf, c.rawSize, base);
+    writeU32(indexBuf, c.compSize, base + 4);
+    writeU64(indexBuf, c.dataOffset + delta, base + 8);
+  }
+  await writeAll(outFd, indexBuf, newIndexOff);
+  const footer = Buffer.alloc(12);
+  MAGIC_FOOTER.copy(footer, 0);
+  writeU64(footer, newIndexOff, 4);
+  await writeAll(outFd, footer, newIndexOff + indexBuf.length);
+  await outFd.truncate(newIndexOff + indexBuf.length + 12).catch(() => {});
+  await outFd.close();
+  await fd.close();
+
+  // Atomic swap.
+  const backup = archive + ".bak";
+  await fs.rename(archive, backup).catch(() => {});
+  await fs.rename(tmp, archive);
+  await fs.unlink(backup).catch(() => {});
+
+  return { renamed: renames.size, files: files.length };
+}
+
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
