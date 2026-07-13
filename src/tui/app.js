@@ -115,6 +115,19 @@ export function App() {
   const wide = columns >= 88;
   const narrow = columns < 64;
   const pad = narrow ? 1 : 2;
+  const rows = stdout ? stdout.rows || 24 : 24;
+  // Safe content height for a pane: brand(3)+sep(1)+actionbar(1)+2 hints(2)=7,
+  // minus pane border(2)+title(1)=3. `win` leaves 2 lines for ▲/▼ hints.
+  const maxRows = Math.max(3, rows - 10);
+  const win = Math.max(1, maxRows - 2);
+
+  function clampScroll(cursor, scroll, len) {
+    if (len <= win) return 0;
+    let s = scroll;
+    if (cursor < s) s = cursor;
+    else if (cursor >= s + win) s = cursor - win + 1;
+    return Math.max(0, Math.min(s, len - win));
+  }
 
   const [screen, setScreen] = useState("browser");
   const [view, setView] = useState("fs"); // fs | archive
@@ -123,11 +136,13 @@ export function App() {
   const [cwd, setCwd] = useState(process.cwd());
   const [fsEntries, setFsEntries] = useState([]);
   const [fsCursor, setFsCursor] = useState(0);
+  const [fsScroll, setFsScroll] = useState(0);
   const [fsSel, setFsSel] = useState(() => new Set());
 
   const [arcPath, setArcPath] = useState(null);
   const [arcEntries, setArcEntries] = useState([]);
   const [arcCursor, setArcCursor] = useState(0);
+  const [arcScroll, setArcScroll] = useState(0);
   const [arcSel, setArcSel] = useState(() => new Set());
 
   const [action, setAction] = useState(null); // {type, targets/output/mode/format/level | archive/dest/onlyFiles}
@@ -148,6 +163,7 @@ export function App() {
       const items = await readDir(dir);
       setFsEntries(items);
       setFsCursor(0);
+      setFsScroll(0);
     } catch (e) {
       setError("Cannot open: " + e.message);
       setScreen("error");
@@ -164,6 +180,7 @@ export function App() {
       setArcEntries(info.files);
       setArcPath(p);
       setArcCursor(0);
+      setArcScroll(0);
       setArcSel(new Set());
       setView("archive");
       setPaneFocus("archive");
@@ -180,8 +197,13 @@ export function App() {
 
   const move = (d) => {
     const n = Math.max(0, Math.min(entries.length - 1, cursor + d));
-    if (active === "fs") setFsCursor(n);
-    else setArcCursor(n);
+    if (active === "fs") {
+      setFsCursor(n);
+      setFsScroll((s) => clampScroll(n, s, fsEntries.length));
+    } else {
+      setArcCursor(n);
+      setArcScroll((s) => clampScroll(n, s, arcEntries.length));
+    }
   };
 
   const toggle = (key) => {
@@ -471,26 +493,44 @@ export function App() {
     const isActive = (wide ? paneFocus : view) === kind;
     const title = isFs ? "FILES  " + (narrow ? "" : cwd) : "ARCHIVE  " + (arcPath ? path.basename(arcPath) : "(none)");
     const selSet = isFs ? fsSel : arcSel;
-    const rows = list.slice(0, 200).map((e, i) => {
+    const scroll = isFs ? fsScroll : arcScroll;
+    const start = Math.max(0, Math.min(scroll, Math.max(0, list.length - win)));
+    const end = Math.min(list.length, start + win);
+    const visible = list.slice(start, end);
+
+    const rowEls = [];
+    if (start > 0) {
+      rowEls.push(h(Text, { key: "up", color: C.dim }, `  ▲ ${start} more above`));
+    }
+    visible.forEach((e, i) => {
+      const abs = start + i;
       const name = isFs ? e.name : e.relPath;
       const checked = selSet.has(name);
-      const isCur = i === cur && isActive;
+      const isCur = abs === cur && isActive;
       const isDir = isFs ? e.isDir : false;
       const sizeStr = isFs ? (isDir ? "<DIR>" : humanizeBytes(e.size)) : humanizeBytes(e.rawSize);
-      return h(
-        Box,
-        { key: name + i, flexDirection: "row" },
-        h(Text, { color: isCur ? C.green : C.sub }, isCur ? " ▸ " : "   "),
-        h(Text, { color: checked ? C.yellow : C.sub }, checked ? "[x] " : "[ ] "),
-        h(Text, { color: isDir ? C.dir : isCur ? C.brand : C.sub, bold: isCur }, name.slice(0, narrow ? 26 : 40)),
-        h(Text, { color: C.dim }, "  " + sizeStr)
+      rowEls.push(
+        h(
+          Box,
+          { key: name + abs, flexDirection: "row" },
+          h(Text, { color: isCur ? C.green : C.sub }, isCur ? " ▸ " : "   "),
+          h(Text, { color: checked ? C.yellow : C.sub }, checked ? "[x] " : "[ ] "),
+          h(Text, { color: isDir ? C.dir : isCur ? C.brand : C.sub, bold: isCur }, name.slice(0, narrow ? 26 : 40)),
+          h(Text, { color: C.dim }, "  " + sizeStr)
+        )
       );
     });
+    if (end < list.length) {
+      rowEls.push(h(Text, { key: "down", color: C.dim }, `  ▼ ${list.length - end} more below`));
+    }
+    if (list.length === 0) {
+      rowEls.push(h(Text, { color: C.dim }, "  (empty)"));
+    }
     return h(
       Box,
       { flexDirection: "column", flexGrow: 1, borderStyle: isActive ? "round" : "single", borderColor: isActive ? C.brand : C.dim, paddingX: 1 },
       h(Text, { color: isActive ? C.brand : C.dim, bold: true }, (isActive ? "▸ " : "  ") + title),
-      ...(rows.length ? rows : [h(Text, { color: C.dim }, "  (empty)")])
+      ...rowEls
     );
   };
 

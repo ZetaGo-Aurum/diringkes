@@ -16,6 +16,38 @@ import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
 
+// Best-effort check for a binary. Treats "command not found" as missing;
+// any other error means the binary exists (it just rejected the arg).
+async function commandExists(tool) {
+  try {
+    await execFileP(tool, ["-h"], { timeout: 8000 });
+    return true;
+  } catch (e) {
+    if (e.code === "ENOENT") return false;
+    return true;
+  }
+}
+
+// Try to install p7zip via whatever package manager is available. Best-effort:
+// if it fails (no network / no permission) we simply re-check and fall back.
+async function tryInstall7z() {
+  const installers = [
+    ["pkg", ["install", "-y", "p7zip"]], // Termux
+    ["sudo", ["apt-get", "install", "-y", "p7zip-full"]], // Debian/Ubuntu
+    ["apt-get", ["install", "-y", "p7zip-full"]],
+    ["brew", ["install", "p7zip"]], // macOS
+    ["apk", ["add", "p7zip"]], // Alpine
+  ];
+  for (const [bin, args] of installers) {
+    if (await commandExists(bin)) {
+      try {
+        await execFileP(bin, args, { timeout: 180000 });
+      } catch {}
+      break;
+    }
+  }
+}
+
 // --- CRC32 (zip needs it) --------------------------------------------------
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -49,8 +81,9 @@ export async function repackZip({ inputs, output, level = 9, onProgress = () => 
 
   for (const f of inputs) {
     const data = await fs.readFile(f.path);
-    const comp = level > 0 ? zlib.deflateRawSync(data, { level }) : data;
-    const method = level > 0 ? 8 : 0;
+    const lvl = Math.max(0, Math.min(9, level)); // zlib allows 0..9
+    const comp = lvl > 0 ? zlib.deflateRawSync(data, { level: lvl }) : data;
+    const method = lvl > 0 ? 8 : 0;
     const crc = crc32(data);
     const name = Buffer.from(f.relPath, "utf8");
 
@@ -120,6 +153,16 @@ export async function repackZip({ inputs, output, level = 9, onProgress = () => 
 // ---------------------------------------------------------------------------
 export async function repackExternal({ inputs, output, tool, level = 9, onProgress = () => {} }) {
   const bin = tool === "rar" ? "rar" : "7z";
+  if (!(await commandExists(bin))) {
+    if (tool === "7z") await tryInstall7z();
+    if (!(await commandExists(bin))) {
+      const hint =
+        tool === "rar"
+          ? "Install `rar` (rarlab) or pick .drk / .zip / .7z."
+          : "Install `p7zip` (provides `7z`) or pick .drk / .zip.";
+      throw new Error(`${bin} not found. ${hint}`);
+    }
+  }
   const args = [
     "a",
     "-y",
@@ -134,7 +177,7 @@ export async function repackExternal({ inputs, output, tool, level = 9, onProgre
       tool === "rar"
         ? "Install `rar` (rarlab) or pick .drk / .zip / .7z."
         : "Install `p7zip` (provides `7z`) or pick .drk / .zip.";
-    throw new Error(`${bin} unavailable or failed: ${e.message}. ${hint}`);
+    throw new Error(`${bin} failed: ${e.message}. ${hint}`);
   }
   const { size } = await fs.stat(output);
   const totalRaw = inputs.reduce((a, f) => a + f.size, 0);
