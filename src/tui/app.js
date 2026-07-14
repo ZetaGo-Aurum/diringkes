@@ -57,6 +57,13 @@ function ratioToMode(r) {
   return "ultra";
 }
 
+const MODE_DESC = {
+  store: "no compression · instant",
+  fast: "light effort · very fast",
+  max: "strong effort · balanced",
+  ultra: "maximum effort · slowest",
+};
+
 function KeyCap({ k, label, color = C.green, wide = true }) {
   return h(
     Box,
@@ -151,6 +158,8 @@ export function App() {
   const [formatSel, setFormatSel] = useState(0); // index into FORMATS
   const [nameBuf, setNameBuf] = useState("");
   const [prog, setProg] = useState({ pct: 0, msg: "" });
+  const [logs, setLogs] = useState([]);
+  const logRef = useRef([]);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const abortRef = useRef(null);
@@ -329,8 +338,21 @@ export function App() {
     if (!act) return;
     setScreen("progress");
     setProg({ pct: 0, msg: "" });
+    logRef.current = [];
+    setLogs([]);
     const ab = { aborted: false };
     abortRef.current = ab;
+    let lastLogAt = 0;
+    const pushLog = (msg, throttle) => {
+      if (!msg) return;
+      if (throttle && Date.now() - lastLogAt < 250) return;
+      lastLogAt = Date.now();
+      const arr = logRef.current;
+      if (arr[arr.length - 1] === msg) return;
+      arr.push(msg);
+      if (arr.length > 6) arr.shift();
+      setLogs([...arr]);
+    };
     (async () => {
       try {
         if (act.type === "compress") {
@@ -341,10 +363,12 @@ export function App() {
             mode: act.mode,
             format: act.format,
             level: act.level,
-            onProgress: ({ processed, total, phase }) => {
+            onProgress: ({ processed, total, phase, log }) => {
               if (ab.aborted) return;
               const label = phase === "scan" ? "scanning" : phase === "compress" ? "packing" : "working";
               setProg({ pct: total ? (processed / total) * 100 : 0, msg: `${label} ${humanizeBytes(processed)} / ${humanizeBytes(total)}` });
+              if (log) pushLog(log);
+              else pushLog(`${label} ${humanizeBytes(processed)} / ${humanizeBytes(total)}`, true);
             },
           });
           if (ab.aborted) return;
@@ -561,17 +585,19 @@ export function App() {
     body = h(
       Box,
       { flexDirection: "column", paddingLeft: pad },
-      h(Text, { color: C.accent, bold: true }, "① Compression strength — target ratio"),
-      h(Text, { color: C.sub }, "   Pick a target ratio. Real ratio depends on your data:"),
-      h(Text, { color: C.dim }, "   text/logs shrink a lot; photos, video, .gz/.zip/.mp4 can't (already compressed)."),
-      ...RATIOS.map((r, i) =>
-        h(
+      h(Text, { color: C.accent, bold: true }, "① Compression strength (effort level)"),
+      h(Text, { color: C.sub }, "   Higher = tries harder, not a guaranteed ratio."),
+      h(Text, { color: C.dim }, "   text/logs shrink a lot; photos, video, .gz/.zip/.mp4 barely change (already compressed)."),
+      ...RATIOS.map((r, i) => {
+        const m = ratioToMode(r);
+        const label = `${i + 1}. Level ${r} · ${m} — ${MODE_DESC[m]}`;
+        return h(
           Box,
           { key: r, flexDirection: "row" },
           h(Text, { color: i === ratioSel ? C.green : C.sub, bold: i === ratioSel }, i === ratioSel ? " ▸ " : "   "),
-          h(Text, { color: i === ratioSel ? C.brand : C.sub }, `${i + 1}. ~${r}x  ${ratioToMode(r)}`)
-        )
-      ),
+          h(Text, { color: i === ratioSel ? C.brand : C.sub }, label)
+        );
+      }),
       h(Text, { color: C.sub, marginTop: 1 }, "↑↓ or 1-9,0 to choose · Enter next · Esc cancel")
     );
   } else if (screen === "wizard_format") {
@@ -614,6 +640,14 @@ export function App() {
       h(Text, { color: C.teal }, "Working…"),
       h(Box, { flexDirection: "row", marginTop: 1 }, h(Bar, { pct: prog.pct }), h(Text, { color: C.sub }, ` ${prog.pct.toFixed(0)}%`)),
       h(Text, { color: C.dim }, prog.msg),
+      h(
+        Box,
+        { flexDirection: "column", marginTop: 1, borderStyle: "round", borderColor: C.dim, paddingX: 1 },
+        h(Text, { color: C.sub, bold: true }, "log"),
+        ...(logs.length ? logs : ["…"]).map((l, i) =>
+          h(Text, { key: i, color: i === logs.length - 1 ? C.teal : C.dim, wrap: "truncate-end" }, "› " + l)
+        )
+      ),
       h(Text, { color: C.sub, marginTop: 1 }, "Esc/q to cancel")
     );
   } else if (screen === "result") {
@@ -646,7 +680,7 @@ export function App() {
 function renderResult(r, narrow) {
   if (!r) return [];
   if (r.kind === "compress") {
-    return [
+    const rows = [
       line("output", r.output, C.teal),
       line("mode", r.mode + (r.format && r.format !== "drk" ? " · " + r.format : ""), C.accent),
       line("items", String(r.inputCount ?? 0), C.sub),
@@ -656,6 +690,16 @@ function renderResult(r, narrow) {
       line("ratio", (r.factor ?? 0).toFixed(2) + "x  (" + (r.savedPercent ?? 0).toFixed(1) + "% saved)", C.green, true),
       line("time", elapsed(r.ms), C.sub),
     ];
+    if (r.note) {
+      rows.push(
+        h(
+          Box,
+          { marginTop: 1, paddingX: 1, borderStyle: "round", borderColor: C.yellow },
+          h(Text, { color: C.sub, wrap: "wrap" }, "ℹ  " + r.note)
+        )
+      );
+    }
+    return rows;
   }
   if (r.kind === "extract") {
     return [

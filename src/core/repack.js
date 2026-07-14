@@ -175,31 +175,34 @@ export async function repackExternal({ inputs, output, tool, level = 9, onProgre
   await new Promise((resolve, reject) => {
     const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
     let errbuf = "";
-    let carry = "";
-    let realPct = 0;
+    let lastPct = -1;
+    let lastFile = "";
     let sawReal = false;
+    let pollTimer = null;
 
-    // Heartbeat: when the tool doesn't stream a real percentage (7z hides it
-    // when stdout isn't a TTY), advance a synthetic progress that eases toward
-    // 90% so the UI clearly shows work in progress rather than "stuck at 0%".
-    let synth = 0;
-    const started = Date.now();
-    const beat = setInterval(() => {
-      if (sawReal) return;
-      synth = Math.min(90, synth + Math.max(1, (90 - synth) * 0.08));
-      onProgress({ phase: "compress", processed: (synth / 100) * totalRaw, total: totalRaw, indeterminate: true });
-    }, 250);
-
+    // Primary: parse REAL progress. Both 7z and rar stream lines like
+    // " 42% + name" but separate updates with backspaces (\b) rather than
+    // newlines, so we scan the whole chunk for the LAST "<n>%" occurrence and
+    // the current file name.
     const onData = (d) => {
-      const s = carry + d.toString();
-      const parts = s.split(/[\r\n]/);
-      carry = parts.pop() || "";
-      for (const line of parts) {
-        const m = line.match(/(\d{1,3})%/);
-        if (m) {
+      const s = d.toString();
+      let m;
+      const re = /(\d{1,3})%(?:\s*[+\-]?\s*([^\b\r\n]+?)\s*(?=[\b\r\n]|$))?/g;
+      let last = null;
+      while ((m = re.exec(s)) !== null) last = m;
+      if (last) {
+        const pct = Math.min(100, Number(last[1]));
+        const file = (last[2] || lastFile).trim();
+        if (file) lastFile = file;
+        if (pct !== lastPct) {
           sawReal = true;
-          realPct = Math.min(100, Number(m[1]));
-          onProgress({ phase: "compress", processed: (realPct / 100) * totalRaw, total: totalRaw });
+          lastPct = pct;
+          onProgress({
+            phase: "compress",
+            processed: (pct / 100) * totalRaw,
+            total: totalRaw,
+            log: `${bin}: ${pct}%${lastFile ? " · " + lastFile : ""}`,
+          });
         }
       }
     };
@@ -208,12 +211,28 @@ export async function repackExternal({ inputs, output, tool, level = 9, onProgre
       errbuf += d.toString();
       onData(d);
     });
+
+    // Fallback (real, not fake): if the tool emits no percentage, poll the
+    // growing output file so the user still sees genuine bytes-written motion.
+    pollTimer = setInterval(async () => {
+      if (sawReal) return;
+      try {
+        const st = await fs.stat(output);
+        onProgress({
+          phase: "compress",
+          processed: st.size,
+          total: totalRaw,
+          log: `${bin}: written ${(st.size / 1048576).toFixed(1)} MB`,
+        });
+      } catch {}
+    }, 300);
+
     child.on("error", (e) => {
-      clearInterval(beat);
+      clearInterval(pollTimer);
       reject(e);
     });
     child.on("close", (code) => {
-      clearInterval(beat);
+      clearInterval(pollTimer);
       if (code === 0) resolve();
       else {
         const hint =

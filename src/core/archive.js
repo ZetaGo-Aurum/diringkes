@@ -38,6 +38,33 @@ import { Chunker, streamChunks } from "./chunker.js";
 import { DedupTable, hashChunk } from "./dedupe.js";
 import { compress, decompress, modeId, modeFromId } from "./codec.js";
 import os from "node:os";
+import zlib from "node:zlib";
+
+// Cheap incompressibility probe: already-compressed data (video, photos, audio,
+// archives, encrypted) has near-maximum entropy, so a fast deflate on a small
+// sample barely shrinks it. When so, skip the expensive Brotli pass entirely and
+// store the block verbatim — this makes packing media near-instant instead of
+// grinding q11 for nothing.
+function looksIncompressible(raw) {
+  if (raw.length < 4096) return false;
+  const sampleSize = Math.min(raw.length, 256 * 1024);
+  let sample;
+  if (raw.length <= sampleSize) {
+    sample = raw;
+  } else {
+    // Sample from three regions so headers alone don't skew the estimate.
+    const part = Math.floor(sampleSize / 3);
+    const mid = Math.floor(raw.length / 2) - Math.floor(part / 2);
+    const end = raw.length - part;
+    sample = Buffer.concat([
+      raw.subarray(0, part),
+      raw.subarray(mid, mid + part),
+      raw.subarray(end, end + part),
+    ]);
+  }
+  const probe = zlib.deflateRawSync(sample, { level: 1 });
+  return probe.length >= sample.length * 0.97;
+}
 import {
   openForRead,
   openForWrite,
@@ -235,7 +262,7 @@ export async function createArchive({
     }
     let payload;
     let stored;
-    if (mode === "store") {
+    if (mode === "store" || looksIncompressible(raw)) {
       payload = raw;
       stored = true;
     } else {

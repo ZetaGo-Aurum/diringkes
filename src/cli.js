@@ -179,7 +179,7 @@ async function doCompress(flags) {
     mode,
     format,
     base: flags.base,
-    onProgress: ({ processed, total, done, phase }) => {
+    onProgress: ({ processed, total, done, phase, log }) => {
       if (flags.quiet) return;
       const pct = total ? (processed / total) * 100 : 0;
       const now = Date.now();
@@ -187,10 +187,11 @@ async function doCompress(flags) {
         last = now;
         clearLine();
         const label = phase === "scan" ? "scan " : phase === "compress" ? "pack " : "     ";
+        const tail = log ? "  " + theme.dim("· " + log) : "";
         process.stdout.write(
           `  ${theme.sub(label)}${progressBar(pct)}  ${theme.sub(
             humanizeBytes(processed) + " / " + humanizeBytes(total)
-          )}\r`
+          )}${tail}\r`
         );
       }
     },
@@ -211,6 +212,9 @@ async function doCompress(flags) {
       "saved"
     )} ${theme.green(res.savedPercent.toFixed(1) + "%")}  ${theme.dim("in " + elapsed(dt))}`
   );
+  if (res.note) {
+    console.log(`  ${theme.yellow("ℹ")} ${theme.sub(res.note)}`);
+  }
   return 0;
 }
 
