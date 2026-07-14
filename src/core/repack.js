@@ -11,7 +11,7 @@
 
 import zlib from "node:zlib";
 import { promises as fs } from "node:fs";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
@@ -163,24 +163,70 @@ export async function repackExternal({ inputs, output, tool, level = 9, onProgre
       throw new Error(`${bin} not found. ${hint}`);
     }
   }
-  const args = [
-    "a",
-    "-y",
-    `-mx=${Math.min(9, Math.max(0, level))}`,
-    output,
-    ...inputs.map((f) => f.path),
-  ];
-  try {
-    await execFileP(bin, args, { maxBuffer: 1024 * 1024 * 256 });
-  } catch (e) {
-    const hint =
-      tool === "rar"
-        ? "Install `rar` (rarlab) or pick .drk / .zip / .7z."
-        : "Install `p7zip` (provides `7z`) or pick .drk / .zip.";
-    throw new Error(`${bin} failed: ${e.message}. ${hint}`);
-  }
-  const { size } = await fs.stat(output);
   const totalRaw = inputs.reduce((a, f) => a + f.size, 0);
+  const mx = Math.min(9, Math.max(0, level));
+  // `-bsp1` makes 7z stream progress percentages to stdout so the UI shows a
+  // moving bar instead of appearing stuck at 0%.
+  const args =
+    tool === "rar"
+      ? ["a", "-y", `-m${mx > 5 ? 5 : mx}`, output, ...inputs.map((f) => f.path)]
+      : ["a", "-y", "-bsp1", `-mx=${mx}`, output, ...inputs.map((f) => f.path)];
+
+  await new Promise((resolve, reject) => {
+    const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let errbuf = "";
+    let carry = "";
+    let realPct = 0;
+    let sawReal = false;
+
+    // Heartbeat: when the tool doesn't stream a real percentage (7z hides it
+    // when stdout isn't a TTY), advance a synthetic progress that eases toward
+    // 90% so the UI clearly shows work in progress rather than "stuck at 0%".
+    let synth = 0;
+    const started = Date.now();
+    const beat = setInterval(() => {
+      if (sawReal) return;
+      synth = Math.min(90, synth + Math.max(1, (90 - synth) * 0.08));
+      onProgress({ phase: "compress", processed: (synth / 100) * totalRaw, total: totalRaw, indeterminate: true });
+    }, 250);
+
+    const onData = (d) => {
+      const s = carry + d.toString();
+      const parts = s.split(/[\r\n]/);
+      carry = parts.pop() || "";
+      for (const line of parts) {
+        const m = line.match(/(\d{1,3})%/);
+        if (m) {
+          sawReal = true;
+          realPct = Math.min(100, Number(m[1]));
+          onProgress({ phase: "compress", processed: (realPct / 100) * totalRaw, total: totalRaw });
+        }
+      }
+    };
+    child.stdout.on("data", onData);
+    child.stderr.on("data", (d) => {
+      errbuf += d.toString();
+      onData(d);
+    });
+    child.on("error", (e) => {
+      clearInterval(beat);
+      reject(e);
+    });
+    child.on("close", (code) => {
+      clearInterval(beat);
+      if (code === 0) resolve();
+      else {
+        const hint =
+          tool === "rar"
+            ? "Install `rar` (rarlab) or pick .drk / .zip / .7z."
+            : "Install `p7zip` (provides `7z`) or pick .drk / .zip.";
+        reject(new Error(`${bin} exited ${code}: ${errbuf.trim().slice(-200)}. ${hint}`));
+      }
+    });
+  });
+
+  onProgress({ phase: "compress", processed: totalRaw, total: totalRaw });
+  const { size } = await fs.stat(output);
   return {
     output,
     fileCount: inputs.length,

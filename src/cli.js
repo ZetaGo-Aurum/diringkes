@@ -179,18 +179,18 @@ async function doCompress(flags) {
     mode,
     format,
     base: flags.base,
-    onProgress: ({ processed, total, done }) => {
+    onProgress: ({ processed, total, done, phase }) => {
       if (flags.quiet) return;
       const pct = total ? (processed / total) * 100 : 0;
       const now = Date.now();
       if (done || now - last > 60) {
         last = now;
         clearLine();
-        const bps = processed / ((now - t0) / 1000 || 1);
+        const label = phase === "scan" ? "scan " : phase === "compress" ? "pack " : "     ";
         process.stdout.write(
-          `  ${progressBar(pct)}  ${theme.sub(
+          `  ${theme.sub(label)}${progressBar(pct)}  ${theme.sub(
             humanizeBytes(processed) + " / " + humanizeBytes(total)
-          )}  ${theme.dim(humanizeBytes(bps) + "/s")}\r`
+          )}\r`
         );
       }
     },

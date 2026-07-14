@@ -34,11 +34,19 @@ techniques:
 2. **Global Deduplication** — every unique chunk is stored **once**, no matter
    how many times (or in how many files) it appears. Identical regions anywhere
    in the dataset collapse into a single reference.
-3. **Strong codecs** — `ultra` mode uses **Brotli q11** with a large window;
-   `max` uses Brotli q11; `fast` uses Deflate; `store` keeps data verbatim.
+3. **Solid-block codecs** — the deduplicated chunks are concatenated and
+   compressed together in large **solid blocks** (like 7-Zip), so the codec
+   shares one dictionary across many chunks and reaches whole-stream ratios.
+   `ultra` = Brotli q11, `max` = Brotli q9 (near-ultra, ~10× faster),
+   `fast` = Brotli q6, `store` = verbatim. Blocks compress **in parallel**
+   across CPU cores. Incompressible blocks are stored verbatim (never bloat).
 
-Archives use the bespoke **`.drk`** format: a seekable, indexed, streaming
-binary container that can scale to terabytes while staying random-access.
+Archives use the bespoke **`.drk`** format (v2): a seekable, indexed, streaming
+binary container that can scale to terabytes while staying random-access. Open
+it in the TUI, or inspect/extract with `diringkes l|i|x`.
+
+Real result: an 79 MB JSON dataset compresses to **1.34 MB** (`max`, ~3 s) or
+**999 KB** (`ultra`) — beating `xz -9` (1.26 MB) and `gzip -9` (6.79 MB).
 
 > **Honest note on the "10 GB → 10 MB" legend.** No tool can magically shrink
 > *arbitrary* data — entropy is entropy. But when data is redundant (backups,
@@ -198,7 +206,10 @@ Command shortcuts: `c` compress · `x` extract · `l` list · `i` info ·
 `t` tui · `a` about · `h` help · `v` version.
 
 Flags: `-o/--output`, `-m/--mode <ultra|max|fast|store>`, `-b/--base`,
-`-q/--quiet`, `-y/--yes`, plus `--ultra/--max/--fast`.
+`-q/--quiet`, `-y/--yes`, plus `--ultra/--max/--fast`. Modes: `ultra`
+(Brotli q11, best ratio), `max` (q9, near-ultra & much faster — a great
+default), `fast` (q6), `store` (verbatim). Compression shows a live two-phase
+bar (`scan` → `pack`) so it never looks stuck.
 
 Output format is selectable with `-f/--format <drk|zip|7z|rar>` (default
 `drk`). `.drk` is Diringkes' native ultra format (dedupe + Brotli). `.zip`

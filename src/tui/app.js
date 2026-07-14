@@ -341,9 +341,10 @@ export function App() {
             mode: act.mode,
             format: act.format,
             level: act.level,
-            onProgress: ({ processed, total }) => {
+            onProgress: ({ processed, total, phase }) => {
               if (ab.aborted) return;
-              setProg({ pct: total ? (processed / total) * 100 : 0, msg: `compressing ${humanizeBytes(processed)}/${humanizeBytes(total)}` });
+              const label = phase === "scan" ? "scanning" : phase === "compress" ? "packing" : "working";
+              setProg({ pct: total ? (processed / total) * 100 : 0, msg: `${label} ${humanizeBytes(processed)} / ${humanizeBytes(total)}` });
             },
           });
           if (ab.aborted) return;
